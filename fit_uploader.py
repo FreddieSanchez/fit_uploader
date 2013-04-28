@@ -14,7 +14,7 @@ from selenium import webdriver
 from selenium.webdriver.support.ui import Select
 from selenium.webdriver.support.ui import WebDriverWait
 from pyvirtualdisplay import Display
-
+from fitparse import FitFile
 
 class RunningSite:
   def __init__(self):
@@ -22,6 +22,48 @@ class RunningSite:
 
   def login(self,driver,user,passwd):
     raise NotImplementedError("Subclass must implement abstract method")
+
+class DailyMile(RunningSite):
+  def __init__(self):
+    self.login_addr = "http://www.dailymile.com/login"
+    self.distance = 0
+    self.time = []
+
+  
+  def login(self,driver,user,passwd):
+    driver.get(self.login_addr) 
+    email_field = driver.find_element_by_id('user_email')
+    email_field.send_keys(user)
+    passwd_field = driver.find_element_by_id('user_password')
+    passwd_field.send_keys(passwd)
+    driver.find_element_by_xpath('//*[@id="login_button"]/dd/input').click()
+    return "login" not in driver.current_url
+
+  def upload_file(self,driver,file):
+    f = FitFile(file)
+    f.parse()
+    records = list(f.get_messages(name='record'))
+    self.distance = records[-1].get_value('distance') / 1609.347219 
+    self.time = str(records[-1].get_value('timestamp') - records[0].get_value('timestamp')).split(":")
+    return True
+
+  def fill_in_details(self,driver,notes):
+    title_field = driver.find_element_by_id('entry_title')
+    distance_field = driver.find_element_by_id("entry_distance")
+    hours_field = driver.find_element_by_id("hours_of_time")
+    minutes_field = driver.find_element_by_id("minutes_of_time")
+    seconds_field = driver.find_element_by_id("seconds_of_time")
+    notes_field = driver.find_element_by_id("entry_content_text")
+
+    title_field.send_keys(raw_input("Title:"))
+    distance_field.send_keys(str(self.distance))
+    hours_field.send_keys(str(self.time[0]))
+    minutes_field.send_keys(str(self.time[1]))
+    seconds_field.send_keys(str(self.time[2]))
+    notes_field.send_keys(notes)
+
+    driver.find_element_by_xpath('//*[@id="entry_workout_form"]/div[4]/div[3]/div[3]/ul/li[1]/input').click()
+
 
 class Endomondo(RunningSite):
   def __init__(self):
@@ -193,57 +235,9 @@ def exit(driver,display,err_msg):
   display.stop()
   sys.exit(-1)
 
-
-def login(driver,display,args):
-  passwd = getpass.getpass()
-  driver = webdriver.Firefox()
-  if not rs.login(driver,args.user,passwd):
-    exit(driver,display,"Could not login! Please check your username and password.")
-  print "Successfully logged in!"
-  return driver
-
-def upload_file(driver, display,args):
-  if not rs.upload_file(driver):
-    exit(driver,display,"Could not upload file, sorry!")
-  print "Successfully uploaded file!"
-  return driver
-
-def fill_in_details(driver,display,args):
-  if args.site == "runningahead":
-    WebDriverWait(driver,2)
-    driver.back()
-    edit_link = driver.find_elements_by_class_name("Button")[0]
-    edit_link.click()
-    # Grab all the resources
-    weight_box = driver.find_element_by_name("ctl00$ctl00$ctl00$SiteContent$PageContent$TrainingLogContent$Weight")
-    temperature_box = driver.find_element_by_name("ctl00$ctl00$ctl00$SiteContent$PageContent$TrainingLogContent$Temperature")
-    notes_box = driver.find_element_by_name("ctl00$ctl00$ctl00$SiteContent$PageContent$TrainingLogContent$Notescta")
-    save_button = driver.find_element_by_name("ctl00$ctl00$ctl00$SiteContent$PageContent$TrainingLogContent$Save")
-    stars = driver.find_elements_by_class_name("Empty")
-
-    notes = ""
-    if not args.notes_file:
-      notes = raw_input("Notes:")
-    else:
-      file = open(args.notes_file)
-      notes = file.read()
-      file.close()
- 
-    weight = raw_input("Weight:")
-    weight_box.send_keys(weight)
-    # TODO - get temperature from another source
-    temperature = raw_input("Temperature:")
-    temperature_box.send_keys(temperature)
-    notes_box.send_keys(notes)
-    quality = raw_input("Quality:1-10:")
-    stars[int(quality)].click()
-    effort = raw_input("Effort:1-10:")
-    stars[int(effort)+10].click()
-    save_button.click()
-
 RUNNING_SITES = { "runningahead": RunningAhead(),
                   "endomondo": Endomondo(),
-                  "dailymile":None
+                  "dailymile": DailyMile()
                 }
 if __name__ == "__main__":
   main()
