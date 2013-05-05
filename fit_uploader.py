@@ -8,7 +8,7 @@ Currently, runningahead.com is only supported. I'm going to change this to allow
 multiple sites via classes. It also uses a virtual frame buffer to allow for a headless
 expierence.
 '''
-import sys, argparse, getpass
+import sys, argparse, getpass, requests
 from selenium.common.exceptions import NoSuchElementException
 from selenium import webdriver 
 from selenium.webdriver.support.ui import Select
@@ -22,6 +22,36 @@ class RunningSite:
 
   def login(self,driver,user,passwd):
     raise NotImplementedError("Subclass must implement abstract method")
+  def upload_file(self,driver,file):
+    raise NotImplementedError("Subclass must implement abstract method")
+  def fill_in_details(self,driver,notes,fit_file):
+    raise NotImplementedError("Subclass must implement abstract method")
+
+  def get_weather(self,fit_file):
+    '''
+
+  '''
+    f = FitFile(fit_file)
+    f.parse()
+    records = list(f.get_messages(name='record'))
+    lat = records[0].get_value('position_lat')
+    long = records[0].get_value('position_long')
+    lat  = str(lat * (180.0 / 2**31))
+    long = str(long * (180.0 / 2**31))
+    #Grab all the resources
+    url = "http://api.wunderground.com/api/bdf13372b1f7e319/conditions/q/"+lat+","+long+".json"
+    r = requests.get(url)
+    j = r.json()
+    return {'weather_string':j['current_observation']['weather']  + " " + \
+                             j['current_observation']['temperature_string'] + " " +\
+                             j['current_observation']['wind_string'],
+            'temp_f':j['current_observation']['temp_f'],
+            'temp_c':j['current_observation']['temp_c'],
+            'humidity':j['current_observation']['relative_humidity'],
+            'wind_speed':j['current_observation']['wind_mph'],
+            'wind_gust_mph':j['current_observation']['wind_gust_mph']}
+
+
 
 class DailyMile(RunningSite):
   def __init__(self):
@@ -47,15 +77,16 @@ class DailyMile(RunningSite):
     self.time = str(records[-1].get_value('timestamp') - records[0].get_value('timestamp')).split(":")
     return True
 
-  def fill_in_details(self,driver,notes):
+  def fill_in_details(self,driver,notes,fit_file):
     title_field = driver.find_element_by_id('entry_title')
     distance_field = driver.find_element_by_id("entry_distance")
     hours_field = driver.find_element_by_id("hours_of_time")
     minutes_field = driver.find_element_by_id("minutes_of_time")
     seconds_field = driver.find_element_by_id("seconds_of_time")
     notes_field = driver.find_element_by_id("entry_content_text")
-
-    title_field.send_keys(raw_input("Title:"))
+    
+    # Use the first line of the Notes file for the title.
+    title_field.send_keys(notes.split("\n")[0])
     distance_field.send_keys(str(self.distance))
     hours_field.send_keys(str(self.time[0]))
     minutes_field.send_keys(str(self.time[1]))
@@ -100,7 +131,7 @@ class Endomondo(RunningSite):
 
     return True
 
-  def fill_in_details(self,driver,notes):
+  def fill_in_details(self,driver,notes,fit_file):
     pass
 
 class RunningAhead(RunningSite):
@@ -132,14 +163,15 @@ class RunningAhead(RunningSite):
     element.click()
     return True
 
-  def fill_in_details(self,driver,notes):
-    WebDriverWait(driver,2)
+  def fill_in_details(self,driver,notes,fit_file):
+    WebDriverWait(driver,5)
     driver.back()
     edit_link = driver.find_elements_by_class_name("Button")[0]
     edit_link.click()
 
-    # Grab all the resources
-    weight_box = driver.find_element_by_name("ctl00$ctl00$ctl00$SiteContent$PageContent$TrainingLogContent$Weight")
+    ## Wait for the "Upload" Button to be active, then click it.
+    weight_box = WebDriverWait(driver, 10).until(
+            lambda driver : driver.find_element_by_name("ctl00$ctl00$ctl00$SiteContent$PageContent$TrainingLogContent$Weight"))
     temperature_box = driver.find_element_by_name("ctl00$ctl00$ctl00$SiteContent$PageContent$TrainingLogContent$Temperature")
     notes_box = driver.find_element_by_name("ctl00$ctl00$ctl00$SiteContent$PageContent$TrainingLogContent$Notescta")
     save_button = driver.find_element_by_name("ctl00$ctl00$ctl00$SiteContent$PageContent$TrainingLogContent$Save")
@@ -148,8 +180,14 @@ class RunningAhead(RunningSite):
     weight = raw_input("Weight:")
     weight_box.send_keys(weight)
     # TODO - get temperature from another source
-    temperature = raw_input("Temperature:")
+    
+    weather = self.get_weather(fit_file)
+    temperature = str(weather['temp_f'])
     temperature_box.send_keys(temperature)
+    weather_summary = weather['weather_string']
+
+
+    notes_box.send_keys( weather_summary + "\n")
     notes_box.send_keys(notes)
     quality = raw_input("Quality:1-10:")
     stars[int(quality)].click()
@@ -190,6 +228,7 @@ def main():
     exit(driver,display,"Could not login! Please check your username and password.")
   print "Successfully logged in!"
   
+  running_site.get_weather(args.input_file)
   # attempt to upload the file.
   if not running_site.upload_file(driver,args.input_file):
     exit(driver,display,"Could not upload file, sorry!")
@@ -204,7 +243,7 @@ def main():
     file.close()
 
   # fill in the details for the run
-  running_site.fill_in_details(driver,notes)
+  running_site.fill_in_details(driver,notes,args.input_file)
   
   driver.close()
   display.stop()
