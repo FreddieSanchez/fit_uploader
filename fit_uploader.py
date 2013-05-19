@@ -128,10 +128,23 @@ class Endomondo(RunningSite):
     element = WebDriverWait(driver,10).until(
         lambda driver: driver.find_element_by_name("reviewSumbit"))
     element.click()
-
+ 
     return True
 
   def fill_in_details(self,driver,notes,fit_file):
+
+    element =  WebDriverWait(driver, 10).until(
+            lambda driver : driver.find_element_by_partial_link_text('EDIT'))
+    element.click()
+
+    element =  WebDriverWait(driver, 10).until(
+            lambda driver : driver.find_element_by_id('workoutName'))
+    element.send_keys(notes.split("\n")[0])
+
+    element = driver.find_element_by_id("workoutEditNotes")
+    element.send_keys(notes)
+    
+    driver.find_element_by_name('saveButton').click()
     pass
 
 class RunningAhead(RunningSite):
@@ -179,10 +192,9 @@ class RunningAhead(RunningSite):
 
     weight = raw_input("Weight:")
     weight_box.send_keys(weight)
-    # TODO - get temperature from another source
     
     weather = self.get_weather(fit_file)
-    temperature = str(weather['temp_f'])
+    temperature = str(int(weather['temp_f']))
     temperature_box.send_keys(temperature)
     weather_summary = weather['weather_string']
 
@@ -217,7 +229,7 @@ def main():
   passwd = getpass.getpass()
 
   # start the virtual display
-  display = Display(visible = args.visible, size=(800,600))
+  display = Display(visible = args.visible, size=(1600,900))
   display.start()
 
   # start selenium web driver.
